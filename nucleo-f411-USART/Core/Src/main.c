@@ -3,6 +3,7 @@
 
 /**
  * Takes user input over UART from keyboard to change LED between Red,Green,Blue
+ * Author: AJ Trantham
  */
 
 

@@ -1,0 +1,4 @@
+main.c:4:6:toggle_pin_5	4	static
+main.c:9:6:delay_ms	24	static
+main.c:15:6:enable_GPIOA	4	static
+main.c:24:5:main	8	static
