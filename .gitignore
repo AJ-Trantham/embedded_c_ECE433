@@ -1,0 +1,10 @@
+.metadata
+.launch
+*/.launch
+
+*/Drivers/*
+*/MDK-ARM/*
+*/EWARM/*
+
+*/.settings
+
