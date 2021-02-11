@@ -240,20 +240,20 @@ void compare_timer(uint32_t val){
     // configure PA5 as output to drive the LED
     RCC->AHB1ENR |=  1;             /* enable GPIOA clock */
     GPIOA->MODER &= ~0x00000C00;    /* clear pin mode */
-    /*######*/                      /* set pin to alternate function */
+    GPIOA->MODER |=  0x00000800;    /* set pin to alternate function */
     GPIOA->AFR[0] &= 0x00F00000;    /* clear pin AF bits */
     GPIOA->AFR[0] |= 0x00100000;    /* set pin to AF1 for TIM2 CH1 */
 
     // configure TIM2 to wrap around at 1 Hz
 // and toggle CH1 output when the counter value is 0
     RCC->APB1ENR |= 1;              /* enable TIM2 clock */
-    /*######*/                      /* divided by 16000 */
-    /*######*/                      /* divided by val */
-    /*######*/                      /* set output to toggle on match */
-    /*######*/                      /* set match value */
+    TIM2->PSC = 1600-1;             /* divided by 16000 */
+    TIM2->ARR = val-1;              /* divided by val */
+    TIM2->CCMR1 = 0x30;             /* set output to toggle on match */
+    TIM2->CCR1 = 0;                     /* set match value */
     TIM2->CCER |= 1;                /* enable CH1 compare mode */
     TIM2->CNT = 0;                  /* clear counter */
-    /*######*/                      /* enable TIM2 */
+    TIM2->CR1 = 1;                  /* enable TIM2 */
 
 }
 
