@@ -51,12 +51,12 @@ int main(void) {
 
 
     //// TEST CASE 4:
-    //edge_counter();
+    edge_counter();
 
 
 
     //// TEST CASE 5:
-    compare_timer(1000);    // Autonomous toggling of PA5 using TIM2 Output Compare Feature
+    //compare_timer(1000);    // Autonomous toggling of PA5 using TIM2 Output Compare Feature
 
     while (1) {}
 }
@@ -179,16 +179,23 @@ void edge_counter(){
 
     // *** YOU MUST CONNECT STLINK TX PIN TO PB8 ***
 
-    RCC->AHB1ENR |= 1;
-    GPIOA->MODER &= ~0X00000c00;
-    GPIOA->MODER |=  0X00000400;
+    // CONNECTING TO PA15 INSTEAD
+    RCC->AHB1ENR |= 1;					/* enable GPIOA clock */
+    GPIOA->MODER &= ~0xB0000000;		/* clear the GPIOA MODER bits for pin 15*/
+    GPIOA->MODER |=  0x80000000;		/* Set the bits for MODER 15 to AF 10*/
+    GPIOA->AFR[1] &= ~0xF0000000;		// how to tell which AFR index to use
+    GPIOA->AFR[1] |=  0x10000000;		// put 1 in AFRH15 this describes which AF PA15 will use namely AF1 which is TIM2_ETR - This info is in the data sheet, not the reference manual
 
    // Configure PB8 as input of TIM2 ETR
-   RCC->AHB1ENR  |=  2;             /* enable GPIOB clock */
-   GPIOB->MODER  &= ~0x00030000;    /* clear pin mode */
-   GPIOB->MODER  |=  0x00020000;    /* set pin to alternate function */
-   GPIOB->AFR[1] &= ~0x0000000F;    /* clear pin AF bits */
-   GPIOB->AFR[1] |=  0x00000001;           /* set pin to AF1 for TIM2 ETR */ // I think this sets thAFRR to 0001
+//   RCC->AHB1ENR  |=  2;             /* enable GPIOB clock */
+//   GPIOB->MODER  &= ~0x00030000;    /* clear pin mode */
+//   GPIOB->MODER  |=  0x00020000;    /* set pin to alternate function */
+//   GPIOB->AFR[1] &= ~0x0000000F;    /* clear pin AF bits */
+//   GPIOB->AFR[1] |=  0x00000001;    /* set pin to AF1 for TIM2 ETR */ // I think this sets thAFRR to 0001
+
+
+    // Apparently PA15 is the pin which connects to the TIM2 ETR
+   // RCC->
 
    // Configure TIM2 to use external input as counter clock source
    RCC->APB1ENR |= 1;              /* enable TIM2 clock */
@@ -205,12 +212,6 @@ void edge_counter(){
        // Monitor: TIM2->CNT while you are sending the letter 'U' from terminal
        // you are going to see 0 before you press, then 5 after the 1st 'U',
        // then 10 and so on.
-	   if ((USART2->SR)&(1<<5))  { // Check if there is a packet received
-	   		char input = (USART2->DR)&0xff;
-	   }
-	   if (TIM2->CNT & 1) {
-		   LED_toggle();
-	   }
    }
 }
 

@@ -2,8 +2,8 @@ main.c:30:5:main	16	static
 main.c:68:6:delay_ms	32	static
 main.c:104:6:delay_us	16	static
 main.c:131:6:freq_gen	16	static
-main.c:163:6:edge_counter	16	static
-main.c:220:6:compare_timer	16	static
-main.c:263:6:USART2_init	4	static
-main.c:281:6:LED_init	4	static
-main.c:290:6:LED_toggle	4	static
+main.c:163:6:edge_counter	8	static
+main.c:221:6:compare_timer	16	static
+main.c:264:6:USART2_init	4	static
+main.c:282:6:LED_init	4	static
+main.c:291:6:LED_toggle	4	static
