@@ -18,6 +18,11 @@ void LED_init(){
     GPIOA->BSRR   = (1<<21);        /* Turn LED off           */
 }
 
+void B1_config(void) {
+	GPIOC->MODER &= ~(0x3<<(2*13)); // clears 2 in/out mode for PC13
+	// This should be unnecessary: GPIOC->MODER |= (0<<(2*13)); // this sets bits 2 mode bits for PC13 to input 00
+}
+
 
 
 void delay_ms(uint32_t val) {

@@ -6,6 +6,11 @@ void toggle_pin_5(void);
 void LED_init();
 
 /**
+ * Configures PC13 (push button) to be a set to input mode 00
+ */
+void B1_config(void);
+
+/**
  * delay for milli seconds
  * Note: This function the sysTick timer to delay
  */

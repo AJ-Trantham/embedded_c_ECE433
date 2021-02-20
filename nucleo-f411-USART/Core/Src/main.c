@@ -61,14 +61,10 @@ void PCx_OUT_MODER_config(int pc_num) {
 	GPIOC->MODER |= (1<<(2*pc_num)); // this sets bits 2 mode bits for PCpc_num General purpose output mode 01
 }
 
-/**
- * Configures PCx (where x = pc_num) to be
- * General Purpose output mode 01
- */
+
 void B1_config(void) {
 	GPIOC->MODER &= ~(0x3<<(2*13)); // clears 2 in/out mode for PC13
 	GPIOC->MODER |= (0<<(2*13)); // this sets bits 2 mode bits for PC13 to input 00
-
 }
 
 /**
@@ -124,7 +120,7 @@ int main(void) {
 
 	while (1) {
 
-		// write input when button is pressed - cna I sent up an inturupt and handeler
+		// write input when button is pressed
 		if (!((GPIOC->IDR)&(1<<13))) {
 			//if the TXE bit is 0 then Transmit Data register is NOT empty (so we need to stall the CPU)
 			//if the TXE bit is 1 then Transmit Data register is empty (so we can write next packet)
@@ -132,7 +128,6 @@ int main(void) {
 			// We got out of the while loop, the Transmit Data Register is empty
 			USART2->DR = txData[(txCntr++)%name_len]; // Write the packet to be sentr
 			delayMs(100);
-
 		}
 
 		// receive input
