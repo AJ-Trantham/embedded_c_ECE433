@@ -4,8 +4,8 @@
 #include "stdio.h"
 #include "common_functions.h"
 
-#define PRIO_BUTTON 2
-#define PRIO_TIM2 3
+#define PRIO_BUTTON 2 	// it is important that the button priority is higher (less than) the TIM2 priority
+#define PRIO_TIM2 3		// when the sampling_frequency is set too fast, the tim2 interrupt will constantly fire not leaving time for the button
 #define FAST_SAMPLE_SIZE 1000
 #define FAST_THREASHOLD 500
 
@@ -17,7 +17,7 @@ float get_temp_value(float thermistor_reading);
 int get_sample_rate_from_ADC(int adc_val);
 void myprint(char msg[]);
 void set_sample_interrupt(void);
-float read_ADC(void);
+float read_ADC_voltage(void);
 int read_ADC_step(void);
 
 // globals for interrupts
@@ -59,12 +59,10 @@ void TIM2_IRQHandler(void) {
 	} else {
 		// take sample and send it
 		char txt[256];
-		float voltage = read_ADC();
+		float voltage = read_ADC_voltage();
 		float temp = get_temp_value(voltage);
 		sprintf(txt, "$%.02f;", temp);
 		myprint(txt);
-
-		//delayMs(10);
 	}
 
 	// reset interrupt
@@ -130,8 +128,8 @@ int main (void) {
 
     set_sample_interrupt();
 
-    NVIC_EnableIRQ(TIM2_IRQn);
-    NVIC_SetPriority(TIM2_IRQn, PRIO_TIM2);
+    NVIC_EnableIRQ(TIM2_IRQn);				// enables the tim2 interrupt
+    NVIC_SetPriority(TIM2_IRQn, PRIO_TIM2);	// sets the timer priority
 
     // set the push button interrupt
     SYSCFG->EXTICR[3] &= ~0x00F0;       /* clear port selection for EXTI13 */
@@ -140,9 +138,8 @@ int main (void) {
     EXTI->IMR |= 0x2000;                /* unmask EXTI13 */
     EXTI->FTSR |= 0x2000;               /* select falling edge trigger- this was supposed to be falling edge but it wouldn't work on 0*/
 
-    NVIC_EnableIRQ(EXTI15_10_IRQn);
-
-    NVIC_SetPriority(EXTI15_10_IRQn, PRIO_BUTTON);
+    NVIC_EnableIRQ(EXTI15_10_IRQn);						// enables the Button interrupt
+    NVIC_SetPriority(EXTI15_10_IRQn, PRIO_BUTTON);		// sets the button priority
 
     __enable_irq();
 
@@ -152,12 +149,8 @@ int main (void) {
 }
 
 // returns the float percentage of the ADC
-float read_ADC(void) {
-	RCC->APB2ENR |= 0x00000100;     /* enable ADC1 clock */
-	ADC1->CR2 |= 0x40000000;        /* start a conversion */
-	while(!(ADC1->SR & 2)) {}       /* wait for conv complete */
-
-	return (ADC1->DR)*(V_REF/RES);
+float read_ADC_voltage(void) {
+	return read_ADC_step()*(V_REF/RES);
 }
 
 // returns the discrete value between 0 and RES
@@ -172,7 +165,6 @@ int read_ADC_step() {
 
 void set_sample_interrupt(void) {
 	// set up timer to to interrupt when we should sample
-	//int val = sampling_rate;
 	RCC->APB1ENR |= 1;              /* enable TIM2 clock */
 	TIM2->PSC = 16-1;               /* divided by 16  (use N-1) - dividing by 16 gets in in u sec*/
 	TIM2->ARR = sampling_frequency-1;              /* sampling frequency is the number of micro seconds to count to*/
@@ -180,11 +172,6 @@ void set_sample_interrupt(void) {
 	TIM2->CR1 = 1;                  /* enable TIM2 */
 
 	TIM2->DIER |= 1;				// enable the Update Interrupt Enable
-
-
-
-	//int clk_div = ((float) sampling_frequency / SAMPLES_IN_ONE_SEC) * CLK_SPEED;
-	//set_sysTick_interrupt(clk_div);
 }
 
 /**
@@ -197,13 +184,13 @@ float get_temp_value(float thermistor_reading) {
 }
 
 /**
- * voltage_perc is the voltage percentage as calculated by ADC_VAL*V_ref/Res
+ * get the sample rate from the ADC discrete value between 0 and RES
  */
 int get_sample_rate_from_ADC(int adc_val) {
 
 	// adjust for 0 voltage - pot all the way off
 	if (adc_val == 0) {
-		return 2; // smallest value possible as we subtract 1 whenfeeding to ARR
+		return 2; // smallest value possible as we subtract 1 when feeding to ARR
 	}
 	int new_rate = ((float)adc_val/RES) * sampling_range;
 	return new_rate;
@@ -243,20 +230,4 @@ void USART2_write (int ch) {
 int USART2_read(void) {
     while (!(USART2->SR & 0x0020)) {}   // wait until char arrives
     return USART2->DR;
-}
-
-
-void delayMs(int n) {
-    int i;
-
-    /* Configure SysTick */
-    SysTick->LOAD = 16000;  /* reload with number of clocks per millisecond */
-    SysTick->VAL = 0;       /* clear current value register */
-    SysTick->CTRL = 0x5;    /* Enable the timer */
-
-    for(i = 0; i < n; i++) {
-        while((SysTick->CTRL & 0x10000) == 0) /* wait until the COUNTFLAG is set */
-            { }
-    }
-    SysTick->CTRL = 0;      /* Stop the timer (Enable = 0) */
 }
