@@ -1,21 +1,24 @@
-// Analog Monitoring Programe
+// Analog Monitoring Program
 
 #include "stm32f4xx.h"
 #include "stdio.h"
 #include "common_functions.h"
 
-#define PRIO_BUTTON 1
-#define PRIO_SYSTICK 2
+#define PRIO_BUTTON 2
+#define PRIO_TIM2 3
+#define FAST_SAMPLE_SIZE 1000
+#define FAST_THREASHOLD 500
 
 void delayMs(int);
 void USART2_init(void);
 void USART2_write(int c);
 int USART2_read(void);
 float get_temp_value(float thermistor_reading);
-int get_sample_rate_from_voltage(float voltage_perc);
+int get_sample_rate_from_ADC(int adc_val);
 void myprint(char msg[]);
-void reset_SysTick_interrupt(void);
+void set_sample_interrupt(void);
 float read_ADC(void);
+int read_ADC_step(void);
 
 // globals for interrupts
 const float TEMP_MAX_F = 257.00; // 125 C
@@ -29,22 +32,43 @@ const int CLK_SPEED = 16000000;
 
 int sampling_frequency;
 int sampling_range;
+int adc_samples[FAST_SAMPLE_SIZE];
+int fast_sample_index = 0;
 
 // -----------------------------------------------HANDLERS-------------------------------
-// Note I had to comment out the stm32f4xx_it.c
-void SysTick_Handler(void) {
 
-	// take sample
-	char txt[256];
-	float voltage = read_ADC();
-	float temp = get_temp_value(voltage);
-	sprintf(txt, "$%.02f;", temp);
-	myprint(txt);
 
-	delayMs(10);
+void TIM2_IRQHandler(void) {
+	TIM2->SR = 0;			// clears the interrupt flag UIF
+
+	// when sampling faster than 50 u sec we want to just take samples as fast as possible
+	if (sampling_frequency < FAST_THREASHOLD && fast_sample_index < 1000) {
+		// read adc value and store in adc_samples
+		adc_samples[fast_sample_index++] = read_ADC_step();
+
+	} else if (sampling_frequency < FAST_THREASHOLD) {
+		// when we are in fast mode but are on the 1000th sample
+		fast_sample_index = 0;
+		char txt[256];
+		for (int i=0; i < FAST_SAMPLE_SIZE; i++ ) {
+			float temp = get_temp_value(adc_samples[i]*(V_REF/RES));
+			sprintf(txt, "$%.02f;", temp);
+			myprint(txt);
+		}
+
+	} else {
+		// take sample and send it
+		char txt[256];
+		float voltage = read_ADC();
+		float temp = get_temp_value(voltage);
+		sprintf(txt, "$%.02f;", temp);
+		myprint(txt);
+
+		//delayMs(10);
+	}
 
 	// reset interrupt
-	reset_SysTick_interrupt();
+	set_sample_interrupt();
 }
 
 /** handler for button PC8 **/
@@ -56,22 +80,22 @@ void EXTI15_10_IRQHandler(void) {
 	ADC1->CR2 |= 1;                 /* enable ADC1 */
 
 	// update sample_frequency
-	float voltage = read_ADC();
-	sampling_frequency = get_sample_rate_from_voltage(voltage);
-	reset_SysTick_interrupt();
+	int adc_val = read_ADC_step();
+	sampling_frequency = get_sample_rate_from_ADC(adc_val);
 
 	// set ADC back to channel 0 to read thermistor
 	ADC1->SQR3 = 0;                 /* conversion sequence starts at ch 1 which maps to A1 */
 	ADC1->CR2 |= 1;                 /* enable ADC1 */
 
 	EXTI->PR = 0x2000; 		// clear the pending interrupt flag
+	set_sample_interrupt();
 }
 
 // --------------------------------------------END HANDLERS---------------------------------------
 
 int main (void) {
 
-    //uint16_t result;
+    // initialize variables
 	sampling_frequency = (MAX_SAMPLE_RATE + MIN_SAMPLE_RATE) / 2; // set default sample frequency
 	sampling_range = MAX_SAMPLE_RATE - MIN_SAMPLE_RATE;
 
@@ -101,11 +125,13 @@ int main (void) {
     ADC1->SQR1 = 0;                 /* conversion sequence length 1 */
     ADC1->CR2 |= 1;                 /* enable ADC1 */
 
-
     // set up interrupts
     __disable_irq(); // disables the global interrupt request
 
-    reset_SysTick_interrupt();
+    set_sample_interrupt();
+
+    NVIC_EnableIRQ(TIM2_IRQn);
+    NVIC_SetPriority(TIM2_IRQn, PRIO_TIM2);
 
     // set the push button interrupt
     SYSCFG->EXTICR[3] &= ~0x00F0;       /* clear port selection for EXTI13 */
@@ -134,10 +160,31 @@ float read_ADC(void) {
 	return (ADC1->DR)*(V_REF/RES);
 }
 
+// returns the discrete value between 0 and RES
+int read_ADC_step() {
+	RCC->APB2ENR |= 0x00000100;     /* enable ADC1 clock */
+	ADC1->CR2 |= 0x40000000;        /* start a conversion */
+	while(!(ADC1->SR & 2)) {}       /* wait for conv complete */
 
-void reset_SysTick_interrupt(void) {
-	int clk_div = ((float) sampling_frequency / SAMPLES_IN_ONE_SEC) * CLK_SPEED;
-	set_sysTick_interrupt(clk_div);
+	return (ADC1->DR);
+}
+
+
+void set_sample_interrupt(void) {
+	// set up timer to to interrupt when we should sample
+	//int val = sampling_rate;
+	RCC->APB1ENR |= 1;              /* enable TIM2 clock */
+	TIM2->PSC = 16-1;               /* divided by 16  (use N-1) - dividing by 16 gets in in u sec*/
+	TIM2->ARR = sampling_frequency-1;              /* sampling frequency is the number of micro seconds to count to*/
+	TIM2->CNT = 0;                  /* clear timer counter */
+	TIM2->CR1 = 1;                  /* enable TIM2 */
+
+	TIM2->DIER |= 1;				// enable the Update Interrupt Enable
+
+
+
+	//int clk_div = ((float) sampling_frequency / SAMPLES_IN_ONE_SEC) * CLK_SPEED;
+	//set_sysTick_interrupt(clk_div);
 }
 
 /**
@@ -152,8 +199,14 @@ float get_temp_value(float thermistor_reading) {
 /**
  * voltage_perc is the voltage percentage as calculated by ADC_VAL*V_ref/Res
  */
-int get_sample_rate_from_voltage(float voltage) {
-	return ((voltage/V_REF) * sampling_range);
+int get_sample_rate_from_ADC(int adc_val) {
+
+	// adjust for 0 voltage - pot all the way off
+	if (adc_val == 0) {
+		return 2; // smallest value possible as we subtract 1 whenfeeding to ARR
+	}
+	int new_rate = ((float)adc_val/RES) * sampling_range;
+	return new_rate;
 }
 
 void myprint(char msg[]){
