@@ -57,6 +57,7 @@ void delay_ms(uint32_t val) {
 
 }
 
+// sets specified GPIO to general output mode
 int PXx_OUT_MODER_config(int PX_num, char GPIO) {
 	if (GPIO == 'B' || GPIO == 'B') {
 		GPIOB->MODER &= ~(0x3<<(2*PX_num)); // clears 2 in/out mode for PBpc_num
