@@ -1,4 +1,5 @@
 // Lab 7: usingn DAC SPI device to create waves
+// Remember NSS pin must be tied high alt function is pa4 for this
 
 #include "stm32f411xe.h"
 #include "stdio.h"
@@ -50,7 +51,7 @@ const int CLK_SPEED = 16000000;
 //const int NUM_SAMPLES = 100;
 //const int SAMPLE_SPACING = 1600; // this is the clock divider to divide the systick for 10 samples at a period of a ms - triggers interrupt every 1 us
 //const int SAMPLE_SPACING = 16; // triggers systick every 1/100 of a ms fro 100 samples
-const int SAMPLE_SPACING = 32; // for 50 samples
+const int SAMPLE_SPACING = 160; // for 50 samples
 
 int sampling_frequency;
 int sampling_range;
@@ -216,7 +217,7 @@ void SPI3_init(void) {
 	SPI3->CR1 |= (1<<2);				/* Master selection */
 	SPI3->CR1 |= (1<<3);				/*Set the baud rate to 1*/
 	SPI3->CR2 = 0;
-	SPI3->CR1 |= 0x40;			/* Enable the SPI  TODO: this is not getting set!!!*/
+	SPI3->CR1 |= 0x40;			/* Enable the SPI*/
 }
 
 
