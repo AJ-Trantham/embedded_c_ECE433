@@ -1127,7 +1127,7 @@ void I2C1_byteWrite(uint8_t slave_addr, uint8_t reg_addr, uint8_t reg_data) {
  8000cde:	797b      	ldrb	r3, [r7, #5]
  8000ce0:	6113      	str	r3, [r2, #16]
 
-	while (!(I2C1->SR1 & 0x80));				// wait until we are done writing to kill convo
+	while (!(I2C1->SR1 & 0x80));				// wait until we are done writing to kill convo - this is important and omitting it caused issues
  8000ce2:	bf00      	nop
  8000ce4:	4b08      	ldr	r3, [pc, #32]	; (8000d08 <I2C1_byteWrite+0xa8>)
  8000ce6:	695b      	ldr	r3, [r3, #20]
