@@ -2,10 +2,18 @@
 #include "stm32f4xx.h"
 #include "stdio.h"
 
-// signal priority will always be #1
-#define CONTROL_SAMPLE_PRIO 2 // controls have higher priority since they happen less often
-#define PRIO_SYSTICK 3
+// Goal with priorities is to read controls periodically but not lose signal quality
+#define PRIO_BUTTON 2 	// want to switch imediately to new wave, its ok if this disrupts are signal as it already is by the nature of the request
+#define CONTROL_SAMPLE_PRIO 3 // controls have higher priority since they happen less often temporally
+#define PRIO_SYSTICK 4
+// wave macros
 #define NUM_WAVEPOINTS_PER_CYCLE 50
+#define NUM_WAVES 4
+// pin macros
+#define SS_PIN 11
+#define SS_GPIO 'C'
+#define LDAC_PIN 2
+#define LDAC_GPIO 'D'
 #define NUM_WAVES 4
 
 // util functions
@@ -17,19 +25,26 @@ void myprint(char msg[]);
 int USART2_read(void);
 void USART2_write(int ch);
 void USART2_init(void);
+void B1_config(void);
+int PXx_OUT_MODER_config(int PX_num, char GPIO);
+void turn_on_PXnum(int px_num, char GPIO);
+GPIO_TypeDef * select_GPIO(char GPIO);
+void turn_off_PXnum(int px_num,char GPIO);
 // adc functions
 int read_ADC_step(void);
 float read_read_pot_percent(void);
 void ADC_init(void);
-// control functions
-void update_rate(void);
-void update_depth(void);
 // timing
 void control_sample_timer_config(void);
 void set_sysTick_interrupt(int clk_div);
 void SysTick_Handler(void);
-
-
+// voltage output
+void config_SPI_pins(void);
+void SPI3_init(void);
+void DAC_write(short data);
+// control functions
+void update_rate(void);
+void update_depth(void);
 
 // constants
 const float V_REF = 3.3; //volts
@@ -89,8 +104,6 @@ void TIM2_IRQHandler(void) {
 
 	// reset interrupt
 	control_sample_timer_config();
-
-
 }
 
 // Note I had to comment out the stm32f4xx_it.c
@@ -101,8 +114,8 @@ void SysTick_Handler(void) {
 
 	// apply depth control to base wave value - TODO: could this be a critical section if a call to update depth occurs here
 	int digital_attenuation_range = MINDEPTH - depth;
-	int scaled_wave_point = (digital_attenuation_range * wave_val) + depth;
-	//DAC_write(wave_val);
+	short scaled_wave_point = (digital_attenuation_range * wave_val) + depth;
+	DAC_write(scaled_wave_point);
 
 	char send[16];
 	sprintf(send, "$%d;", scaled_wave_point);
@@ -121,11 +134,11 @@ int main(void) {
 	ADC_init();
 	LED_init();
 	USART2_init();
+	SPI3_init();
 
 	update_rate();
 	update_depth();
 	control_sample_timer_config(); // sets up TIM2 to read ADCs periodically
-
 
 	 // set up interrupts
 	 __disable_irq(); // disables the global interrupt request
@@ -134,6 +147,16 @@ int main(void) {
 
 	 set_sysTick_interrupt(wavepoint_time_space);
 	 NVIC_SetPriority(SysTick_IRQn,PRIO_SYSTICK);
+
+	 // set the push button interrupt
+	 SYSCFG->EXTICR[3] &= ~0x00F0;       /* clear port selection for EXTI13 */
+	 SYSCFG->EXTICR[3] |= 0x0020;        /* select port C for EXTI13 */
+
+	 EXTI->IMR |= 0x2000;                /* unmask EXTI13 */
+	 EXTI->FTSR |= 0x2000;               /* select falling edge trigger- this was supposed to be falling edge but it wouldn't work on 0*/
+
+	 NVIC_EnableIRQ(EXTI15_10_IRQn);						// enables the Button interrupt
+	 NVIC_SetPriority(EXTI15_10_IRQn, PRIO_BUTTON);		// sets the button priority
 	 __enable_irq();
 
 	while(1) {
@@ -213,6 +236,65 @@ void set_sysTick_interrupt(int clk_div) {
 	SysTick->LOAD = (int)(time * sysClk * clk_div)-1; // set reload to 1 ms times clk_div ms to get clk_div ms
 	SysTick->VAL = 0;
 	SysTick->CTRL = 0x7;			//enables the SysTick interrupt
+}
+
+// -------------------------------------------------- Voltage output -----------------------------------------------------
+/** sets up pins to use for SPI lines to communicate with the MCP4911 DAC
+ * on this DAC, when LDAC pin goes LOW DAC does conversion and writes to VOUT
+ */
+void config_SPI_pins(void) {
+
+	RCC->AHB1ENR |= 1<<3; 				//enable GPIOD
+	RCC->AHB1ENR |= 1<<2;				// enable GPIOC
+	// initialize •	Use PC10, PC12, PC11, and PD2 for SCK, MOSI, SS, and LDAC_
+	GPIOC->AFR[1] |= 0x6<<(4*2); 		/*set PC10 to SPI3 CLK*/
+	GPIOC->MODER &= ~(0x3<<(2*10));		/* clear MODER for PC10*/
+	GPIOC->MODER |= (0x2<<((2*10)));	/* set PC10 to AF 10*/
+
+	GPIOC->AFR[1] |= 0x6<<(4*4);		/*set PC12 to MOSI */
+	GPIOC->MODER &= ~(0x3<<(2*12));		/* clear MODER for PC12*/
+	GPIOC->MODER |= (0x2<<((2*12)));	/* set PC10 to AF 12*/
+
+	PXx_OUT_MODER_config(SS_PIN,SS_GPIO);		/*set PC11 to general output mode for SS */
+
+	PXx_OUT_MODER_config(LDAC_PIN,LDAC_GPIO);		/*set PD2 to general output mode for LDAC*/
+
+	turn_on_PXnum(LDAC_PIN, LDAC_GPIO);			    /* set LDAC HIGH to start - latch closed aka don't write to VOUT*/
+}
+
+/**Configures and enables the SPI3 module */
+void SPI3_init(void) {
+	config_SPI_pins();
+	RCC->APB1ENR |= (1<<15);			/* Enable SPI3 CLK */
+	RCC->AHB1ENR |= 1;					/* enable GPIOA clock*/
+	GPIOA->AFR[0] |= 0x6<<(4*4);		/*set PA4 to alternate function 6 */
+	GPIOA->MODER &= ~(0x3<<(2*4));		/* clear MODER for PA4*/
+	GPIOA->MODER |= (0x2<<((2*4)));		/* set PA4 to AF */
+	//TODO: why is PA4 important - NSS pin needs to be tied high
+	SPI3->CR1 |= (1<<11);				/* sets SPI to send 16 bits */
+	SPI3->CR1 |= (1<<2);				/* Master selection */
+	SPI3->CR1 |= (1<<3);				/*Set the baud rate to 1*/
+	SPI3->CR2 = 0;
+	SPI3->CR1 |= 0x40;			/* Enable the SPI*/
+}
+
+/** Write digital data value to the DAC */
+void DAC_write(short data) {
+
+	while(!(SPI3->SR & 2)) {}
+
+	turn_off_PXnum(SS_PIN,SS_GPIO); 	// bring SS low
+
+	// write data and fill config bits 0011 with MSB first
+	SPI3->DR = 0x3000 | (data << 2);
+
+	while(SPI3->SR & 0x80) {}					// wait for the transmission to be done. while busy wait
+	//bring SS high - we are done writing
+	turn_on_PXnum(SS_PIN, SS_GPIO);
+
+	turn_off_PXnum(LDAC_PIN, LDAC_GPIO);			// set LDAC low - this tells the DAC to process the value we sent it
+	for(int i=0; i<10; i++) {}						// some delay
+	turn_on_PXnum(LDAC_PIN, LDAC_GPIO);			// bring LDAC high again
 }
 
 // ------------------------------------------------- Control Functions ---------------------------------------------------
@@ -303,4 +385,56 @@ void USART2_write (int ch) {
 int USART2_read(void) {
     while (!(USART2->SR & 0x0020)) {}   // wait until char arrives
     return USART2->DR;
+}
+
+void B1_config(void) {
+	RCC->AHB1ENR |= 1<<2; // enable GPIOC for push button
+	GPIOC->MODER &= ~(0x3<<(2*13)); // clears 2 in/out mode for PC13
+	// This should be unnecessary: GPIOC->MODER |= (0<<(2*13)); // this sets bits 2 mode bits for PC13 to input 00
+}
+
+/** set up Specific GPIO pin to be general output */
+int PXx_OUT_MODER_config(int PX_num, char GPIO) {
+	if (GPIO == 'B' || GPIO == 'b') {
+		GPIOB->MODER &= ~(0x3<<(2*PX_num)); // clears 2 in/out mode for PBpc_num
+		GPIOB->MODER |= (1<<(2*PX_num)); // this sets bits 2 mode bits for PBc_num General purpose output mode 01
+	} else if (GPIO == 'C' || GPIO == 'c') {
+		GPIOC->MODER &= ~(0x3<<(2*PX_num)); // clears 2 in/out mode for PCpc_num
+		GPIOC->MODER |= (1<<(2*PX_num)); // this sets bits 2 mode bits for PCpc_num General purpose output mode 01
+	} else if (GPIO == 'D' || GPIO == 'd') {
+		GPIOD->MODER &= ~(0x3<<(2*PX_num)); // clears 2 in/out mode for PCpc_num
+		GPIOD->MODER |= (1<<(2*PX_num)); // this sets bits 2 mode bits for PCpc_num General purpose output mode 01
+	} else {
+		// unsupported GIPO choice
+		return -1;
+	}
+	return 0;
+}
+
+/** Turns off PC(pc_num) */
+void turn_off_PXnum(int px_num,char GPIO) {
+	GPIO_TypeDef * selected_GPIO = select_GPIO(GPIO);
+	selected_GPIO->ODR = (0x0<<px_num);
+}
+
+/** turns PC(pc_num) to high  */
+void turn_on_PXnum(int px_num, char GPIO) {
+	GPIO_TypeDef * selected_GPIO = select_GPIO(GPIO);
+	selected_GPIO->ODR |= (0x1<<px_num);
+}
+
+/** returns the GPIO pointer based on the GPIO char */
+GPIO_TypeDef * select_GPIO(char GPIO) {
+
+	if (GPIO == 'A') {
+		return GPIOA;
+	} else if(GPIO == 'B') {
+		return GPIOB;
+	} else if (GPIO =='C') {
+		return GPIOC;
+	} else if (GPIO == 'D') {
+		return GPIOD;
+	} else {
+		return GPIOE;
+	}
 }
