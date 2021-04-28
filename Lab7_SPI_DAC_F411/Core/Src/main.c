@@ -246,7 +246,7 @@ int read_ADC_step() {
 
 
 void set_sample_interrupt(void) {
-	// set up timer to to interrupt when we should sample
+	// set up timer to to interrupt when we should sample the ADC
 	RCC->APB1ENR |= 1;              /* enable TIM2 clock */
 	TIM2->PSC = 16-1;               /* divided by 16  (use N-1) - dividing by 16 gets in in u sec*/
 	TIM2->ARR = sampling_frequency-1;              /* sampling frequency is the number of micro seconds to count to*/

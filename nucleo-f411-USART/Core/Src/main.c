@@ -31,7 +31,7 @@ void UART2_init(void) {
  */
 void UART2_rx(void) {
 	// set PA3 to UART2 RX
-	GPIOA->MODER &= ~(0X3<<(2*3)); // clear PA3's 2 bits
+	GPIOA->MODER &= ~(0x3<<(2*3)); // clear PA3's 2 bits
 	GPIOA->MODER |= (0x02<<(2*3)); // set PA3's 2 bits to AF
 
 	//set the AF to be AF 7
