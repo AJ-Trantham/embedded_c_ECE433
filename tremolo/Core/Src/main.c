@@ -3,7 +3,10 @@
 #include "stdio.h"
 
 // signal priority will always be #1
-#define CONTROL_SAMPLE_PRIO 3
+#define CONTROL_SAMPLE_PRIO 2 // controls have higher priority since they happen less often
+#define PRIO_SYSTICK 3
+#define NUM_WAVEPOINTS_PER_CYCLE 50
+#define NUM_WAVES 4
 
 // util functions
 void PCx_OUT_MODER_config(int pc_num);
@@ -21,7 +24,10 @@ void ADC_init(void);
 // control functions
 void update_rate(void);
 void update_depth(void);
+// timing
 void control_sample_timer_config(void);
+void set_sysTick_interrupt(int clk_div);
+void SysTick_Handler(void);
 
 
 
@@ -34,7 +40,9 @@ const int MAXRATE = 100; // 100 ms or 10 Hz
 const int MAXDEPTH = 0; // signal is attenuated 100%, or voltage is 0, step of 0
 const int MINDEPTH = 1024; // when depth is minimized, signal is not attenuated, which means voltage is max, stored as DAC_Step
 // TODO: compiler won't let me assign a const here? why??
-const int control_sample_time = 100000; // micro seconds, so reads controls 10 times a second
+const int control_sample_time = 100000; // micro seconds, so reads controls 10 times a second at 100000 or every 100 ms
+const int num_wavepoints_per_cycle = NUM_WAVEPOINTS_PER_CYCLE; // wave sample
+
 
 // globals
 /**
@@ -52,6 +60,25 @@ int depth = 0;
  * should always be between MINRATE and MAXRATE */
 int rate = 0;
 
+/** The time in ms between each wave sample data. Detirmined by rate/num_wavepoints_per_cycle */
+int wavepoint_time_space;
+
+/** index for the way type */
+int wave_index = 0;
+
+/** index for the wavepoint sample */
+int sample_index = 0;
+
+float current_wave[NUM_WAVES][NUM_WAVEPOINTS_PER_CYCLE] = {
+		{0.5,0.56267,0.62434,0.68406,0.74088,0.79389,0.84227,0.88526,0.92216,0.95241,0.97553,0.99114,0.99901,0.99901,0.99114,0.97553,0.95241,0.92216,0.88526,0.84227,0.79389,0.74088,0.68406,0.62434,0.56267,0.5,0.43733,0.37566,0.31594,0.25912,0.20611,0.15773,0.11474,0.077836,0.047586,0.024472,0.0088564,0.00098664,0.00098664,0.0088564,0.024472,0.047586,0.077836,0.11474,0.15773,0.20611,0.25912,0.31594,0.37566,0.43733
+		}, //sine wave
+		{1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}, // square wave
+		{0,0.04,0.08,0.12,0.16,0.2,0.24,0.28,0.32,0.36,0.4,0.44,0.48,0.52,0.56,0.6,0.64,0.68,0.72,0.76,0.8,0.84,0.88,0.92,0.96,1,0.96,0.92,0.88,0.84,0.8,0.76,0.72,0.68,0.64,0.6,0.56,0.52,0.48,0.44,0.4,0.36,0.32,0.28,0.24,0.2,0.16,0.12,0.08,0.04
+		}, // triangle wave
+		{0,0.020408,0.040816,0.061224,0.081633,0.10204,0.12245,0.14286,0.16327,0.18367,0.20408,0.22449,0.2449,0.26531,0.28571,0.30612,0.32653,0.34694,0.36735,0.38776,0.40816,0.42857,0.44898,0.46939,0.4898,0.5102,0.53061,0.55102,0.57143,0.59184,0.61224,0.63265,0.65306,0.67347,0.69388,0.71429,0.73469,0.7551,0.77551,0.79592,0.81633,0.83673,0.85714,0.87755,0.89796,0.91837,0.93878,0.95918,0.97959,1
+		} // sawtooth
+};
+
 // -------------------------------------------------ISRs--------------------------------------------------------------------
 
 void TIM2_IRQHandler(void) {
@@ -62,6 +89,30 @@ void TIM2_IRQHandler(void) {
 
 	// reset interrupt
 	control_sample_timer_config();
+
+
+}
+
+// Note I had to comment out the stm32f4xx_it.c
+void SysTick_Handler(void) {
+
+	// update the TIM1 duty cycle for each channel to continue to generate the wave form
+	float wave_val = current_wave[wave_index][sample_index++];
+
+	// apply depth control to base wave value - TODO: could this be a critical section if a call to update depth occurs here
+	int digital_attenuation_range = MINDEPTH - depth;
+	int scaled_wave_point = (digital_attenuation_range * wave_val) + depth;
+	//DAC_write(wave_val);
+
+	char send[16];
+	sprintf(send, "$%d;", scaled_wave_point);
+	myprint(send);
+
+	if (sample_index % NUM_WAVEPOINTS_PER_CYCLE == 0) {
+		sample_index = 0;
+	}
+
+	set_sysTick_interrupt(wavepoint_time_space);
 }
 
 
@@ -71,23 +122,29 @@ int main(void) {
 	LED_init();
 	USART2_init();
 
-	control_sample_timer_config();
+	update_rate();
+	update_depth();
+	control_sample_timer_config(); // sets up TIM2 to read ADCs periodically
+
 
 	 // set up interrupts
 	 __disable_irq(); // disables the global interrupt request
 	 NVIC_EnableIRQ(TIM2_IRQn);				// enables the tim2 interrupt
 	 NVIC_SetPriority(TIM2_IRQn, CONTROL_SAMPLE_PRIO);	// sets the timer priority
+
+	 set_sysTick_interrupt(wavepoint_time_space);
+	 NVIC_SetPriority(SysTick_IRQn,PRIO_SYSTICK);
 	 __enable_irq();
 
 	while(1) {
 
-		char send[10];
-		sprintf(send, "$%d;", depth);
-		myprint(send);
+//		char send[10];
+//		sprintf(send, "$%d;", depth);
+//		myprint(send);
 
 		// need to paramatarize between acceptable time threasholds
-		LED_toggle();
-		delay_ms(rate/2);
+		//LED_toggle();
+		//delay_ms(rate/2);
 	}
 }
 
@@ -125,8 +182,11 @@ int read_ADC_step(void) {
 	return (ADC1->DR);
 }
 
+// --------------------------------------------Timing --------------------------------------------------------------------------
+
 /**
  * Using TIM2 sets a triggers an interrupt every control_sample_time micro seconds
+ * Used to control the read time of the ADC, every time this timer fires we read the ADC
  */
 void control_sample_timer_config(void) {
 	// set up timer to to interrupt when we should sample
@@ -139,6 +199,22 @@ void control_sample_timer_config(void) {
 	TIM2->DIER |= 1;				// enable the Update Interrupt Enable
 }
 
+/**
+ * Sets up the SysTick interrupt to fire
+ * clk_div divdes the clock so clk_div = 16000000 gets a
+ * 1 sec interrupt
+ * here clk_div param is assumed to be milli seconds
+ */
+void set_sysTick_interrupt(int clk_div) {
+	RCC->APB2ENR |= 0x4000; // enable the SysCFG clk, used for sysTick
+	// config SysTick to be in interrupt mode
+	uint32_t sysClk = 16000000; //Hz
+	float time = 0.001; //sec
+	SysTick->LOAD = (int)(time * sysClk * clk_div)-1; // set reload to 1 ms times clk_div ms to get clk_div ms
+	SysTick->VAL = 0;
+	SysTick->CTRL = 0x7;			//enables the SysTick interrupt
+}
+
 // ------------------------------------------------- Control Functions ---------------------------------------------------
 /** Reads Rate Pot PA1 and updates rate global variable */
 void update_rate(void) {
@@ -146,6 +222,9 @@ void update_rate(void) {
 	ADC1->CR2 |= 1;                 /* enable ADC1 */
 	float pot_perc = read_pot_percent();
 	rate = (pot_perc * (MAXRATE - MINRATE)) + MINRATE;
+	// reset the period of our wave
+	wavepoint_time_space = rate / num_wavepoints_per_cycle; // in ms
+	set_sysTick_interrupt(wavepoint_time_space); // reset the wave period when rate is updated
 }
 
 /** Reads Depth Pot PA0 and updates depth global variable */
