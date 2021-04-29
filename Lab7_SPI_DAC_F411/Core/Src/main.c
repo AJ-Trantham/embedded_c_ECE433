@@ -390,7 +390,7 @@ int PXx_OUT_MODER_config(int PX_num, char GPIO) {
 	if (GPIO == 'B' || GPIO == 'b') {
 		GPIOB->MODER &= ~(0x3<<(2*PX_num)); // clears 2 in/out mode for PBpc_num
 		GPIOB->MODER |= (1<<(2*PX_num)); // this sets bits 2 mode bits for PBc_num General purpose output mode 01
-	} else if (GPIO == 'C' || GPIO == 'c') {
+	} else if (GPIO == 'C' || GPIO  == 'c') {
 		GPIOC->MODER &= ~(0x3<<(2*PX_num)); // clears 2 in/out mode for PCpc_num
 		GPIOC->MODER |= (1<<(2*PX_num)); // this sets bits 2 mode bits for PCpc_num General purpose output mode 01
 	} else if (GPIO == 'D' || GPIO == 'd') {

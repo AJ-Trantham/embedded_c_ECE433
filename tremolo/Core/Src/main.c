@@ -53,7 +53,7 @@ const int ADC_RES = 4096; // 12 bits - resolution of ADC reads
 const int MINRATE = 333; // 333 ms or 3 Hz
 const int MAXRATE = 100; // 100 ms or 10 Hz
 const int MAXDEPTH = 0; // signal is attenuated 100%, or voltage is 0, step of 0
-const int MINDEPTH = 1024; // when depth is minimized, signal is not attenuated, which means voltage is max, stored as DAC_Step
+const int MINDEPTH = 1023; // when depth is minimized, signal is not attenuated, which means voltage is max, stored as DAC_Step
 // TODO: compiler won't let me assign a const here? why??
 const int control_sample_time = 100000; // micro seconds, so reads controls 10 times a second at 100000 or every 100 ms
 const int num_wavepoints_per_cycle = NUM_WAVEPOINTS_PER_CYCLE; // wave sample
@@ -106,15 +106,17 @@ void TIM2_IRQHandler(void) {
 	control_sample_timer_config();
 }
 
-// Note I had to comment out the stm32f4xx_it.c
+/** Controls the wave creation, this interrupt is based on rate as setup by update_rate()
+ * Note: I had to comment out the stm32f4xx_it.c
+ */
 void SysTick_Handler(void) {
 
-	// update the TIM1 duty cycle for each channel to continue to generate the wave form
 	float wave_val = current_wave[wave_index][sample_index++];
 
 	// apply depth control to base wave value - TODO: could this be a critical section if a call to update depth occurs here
 	int digital_attenuation_range = MINDEPTH - depth;
 	short scaled_wave_point = (digital_attenuation_range * wave_val) + depth;
+
 	DAC_write(scaled_wave_point);
 
 	char send[16];
@@ -126,6 +128,20 @@ void SysTick_Handler(void) {
 	}
 
 	set_sysTick_interrupt(wavepoint_time_space);
+}
+
+/** handler for button PC8
+ * Change to next wave in the sequence
+ */
+void EXTI15_10_IRQHandler(void) {
+
+	// increment the wave index so we access a different wave
+	wave_index++;
+	if (wave_index % NUM_WAVES == 0 ) {
+		wave_index = 0;
+	}
+
+	EXTI->PR = 0x2000; 		// clear the pending interrupt flag
 }
 
 
@@ -161,13 +177,6 @@ int main(void) {
 
 	while(1) {
 
-//		char send[10];
-//		sprintf(send, "$%d;", depth);
-//		myprint(send);
-
-		// need to paramatarize between acceptable time threasholds
-		//LED_toggle();
-		//delay_ms(rate/2);
 	}
 }
 
@@ -176,7 +185,6 @@ int main(void) {
 /**
  * Initializes ADC to read both the Depth (PA0) and Rate (PA1)
  * Set up ADC to read both values on a read conversation
- * TODO: could update this to read PA0 and then PA1 in one read...
  */
 void ADC_init(void) {
 	RCC->AHB1ENR |= 1;	            /* enable GPIOA clock */
@@ -270,7 +278,7 @@ void SPI3_init(void) {
 	GPIOA->AFR[0] |= 0x6<<(4*4);		/*set PA4 to alternate function 6 */
 	GPIOA->MODER &= ~(0x3<<(2*4));		/* clear MODER for PA4*/
 	GPIOA->MODER |= (0x2<<((2*4)));		/* set PA4 to AF */
-	//TODO: why is PA4 important - NSS pin needs to be tied high
+	//NSS pin needs to be tied high - PA4 needs to be tied to HIGH (3.3)
 	SPI3->CR1 |= (1<<11);				/* sets SPI to send 16 bits */
 	SPI3->CR1 |= (1<<2);				/* Master selection */
 	SPI3->CR1 |= (1<<3);				/*Set the baud rate to 1*/
