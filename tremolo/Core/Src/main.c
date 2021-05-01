@@ -113,7 +113,7 @@ void SysTick_Handler(void) {
 
 	float wave_val = current_wave[wave_index][sample_index++];
 
-	// apply depth control to base wave value - TODO: could this be a critical section if a call to update depth occurs here
+	// apply depth control to base wave value
 	int digital_attenuation_range = MINDEPTH - depth;
 	short scaled_wave_point = (digital_attenuation_range * wave_val) + depth;
 
@@ -235,6 +235,7 @@ void control_sample_timer_config(void) {
  * clk_div divdes the clock so clk_div = 16000000 gets a
  * 1 sec interrupt
  * here clk_div param is assumed to be milli seconds
+ * SysTick is used to send the attenuation voltage
  */
 void set_sysTick_interrupt(int clk_div) {
 	RCC->APB2ENR |= 0x4000; // enable the SysCFG clk, used for sysTick
@@ -340,9 +341,13 @@ void LED_toggle(void) {
     GPIOA->ODR ^=0x20;              /* Toggle LED            */
 }
 
+/** Using SysTick Timer:
+* A delay function that can stall CPU 1msec to 100 sec, depending on val.
+* From lab 3
+*/
 void delay_ms(uint32_t val) {
-    // Using SysTick Timer:
-    //        A delay function that can stall CPU 1msec to 100 sec, depending on val.
+
+
 
 	uint32_t sysClk = 16000000; //Hz
 	float time = 0.001; //sec
@@ -365,7 +370,9 @@ void myprint(char msg[]){
 	}
 }
 
-/* initialize USART2 to transmit at 115200 Baud */
+/* initialize USART2 to transmit at 115200 Baud
+ * From Lab7
+ */
 void USART2_init(void) {
     RCC->AHB1ENR |= 1;          /* Enable GPIOA clock */
     RCC->APB1ENR |= 0x20000;    /* Enable USART2 clock */
@@ -383,13 +390,13 @@ void USART2_init(void) {
     USART2->CR1 |= 0x2000;      /* enable USART2 */
 }
 
-/* Write a character to USART2 */
+/* Write a character to USART2, code from Lab7*/
 void USART2_write (int ch) {
     while (!(USART2->SR & 0x0080)) {}   // wait until Tx buffer empty
     USART2->DR = (ch & 0xFF);
 }
 
-/* Read a character from USART2 */
+/* Read a character from USART2, code from Lab7 */
 int USART2_read(void) {
     while (!(USART2->SR & 0x0020)) {}   // wait until char arrives
     return USART2->DR;
